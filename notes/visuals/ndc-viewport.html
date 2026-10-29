@@ -1,0 +1,205 @@
+<div id="ndc-viewport-20261023">
+  <style>
+    #ndc-viewport-20261023 .nv-plots { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+    #ndc-viewport-20261023 .nv-panel { min-width:0; }
+    #ndc-viewport-20261023 .nv-panel-label { margin:12px 0 4px; font-weight:500; }
+    #ndc-viewport-20261023 .nv-plot { display:block; width:100%; }
+    #ndc-viewport-20261023 .nv-plot text { fill:var(--foreground); font-size:12px; font-weight:400; }
+    #ndc-viewport-20261023 .nv-frame { fill:none; stroke:var(--border); stroke-width:1; }
+    #ndc-viewport-20261023 .nv-boundary { fill:none; stroke:var(--muted-foreground); stroke-width:1; }
+    #ndc-viewport-20261023 .nv-grid { stroke:var(--border); stroke-width:1; }
+    #ndc-viewport-20261023 .nv-original { fill:none; stroke:var(--muted-foreground); stroke-width:1; }
+    #ndc-viewport-20261023 .nv-visible { fill:var(--viz-series-1); fill-opacity:0.15; stroke:var(--viz-series-1); stroke-width:1.5; }
+    #ndc-viewport-20261023 .nv-point { fill:var(--muted-foreground); }
+    #ndc-viewport-20261023 .nv-active { fill:var(--viz-series-1); }
+    #ndc-viewport-20261023 .nv-detail { margin-top:8px; }
+    @media (max-width:640px) { #ndc-viewport-20261023 .nv-plots { grid-template-columns:minmax(0,1fr); gap:4px; } }
+  </style>
+  <h3>NDC とピクセル座標</h3>
+  <div class="viz-controls">
+    <label class="form-label" for="nv-x">頂点 A の x：<output id="nv-x-value" class="tabular-nums">−0.50</output>
+      <input class="form-range" id="nv-x" type="range" min="-1.5" max="1.5" step="0.05" value="-0.5">
+    </label>
+    <label class="form-label" for="nv-y">頂点 A の y：<output id="nv-y-value" class="tabular-nums">−0.50</output>
+      <input class="form-range" id="nv-y" type="range" min="-1.5" max="1.5" step="0.05" value="-0.5">
+    </label>
+    <label class="form-label" for="nv-viewport">視口（左下は 0, 0）
+      <select class="form-select" id="nv-viewport">
+        <option value="640x480">640 × 480 px</option>
+        <option value="1280x960">1280 × 960 px</option>
+        <option value="960x480">960 × 480 px</option>
+        <option value="480x640">480 × 640 px</option>
+      </select>
+    </label>
+  </div>
+  <div class="nv-plots">
+    <div class="nv-panel">
+      <div class="nv-panel-label">NDC：内枠が −1 ～ 1</div>
+      <svg id="nv-ndc" class="nv-plot" role="img" aria-label="NDC と表示範囲"></svg>
+    </div>
+    <div class="nv-panel">
+      <div class="nv-panel-label">Screen-space：内枠が視口</div>
+      <svg id="nv-pixels" class="nv-plot" role="img" aria-label="フレームバッファ上のピクセル座標"></svg>
+    </div>
+  </div>
+  <div id="nv-detail" class="nv-detail tabular-nums" aria-live="polite"></div>
+  <script>
+  (() => {
+    const root = document.getElementById('ndc-viewport-20261023');
+    const xInput = root.querySelector('#nv-x');
+    const yInput = root.querySelector('#nv-y');
+    const viewportInput = root.querySelector('#nv-viewport');
+    const xValue = root.querySelector('#nv-x-value');
+    const yValue = root.querySelector('#nv-y-value');
+    const detail = root.querySelector('#nv-detail');
+    const presets = {'640x480':[640,480], '1280x960':[1280,960], '960x480':[960,480], '480x640':[480,640]};
+    const ns = 'http://www.w3.org/2000/svg';
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let state = {x:-0.5, y:-0.5, viewport:'640x480'};
+    let shown = {x:-0.5, y:-0.5};
+    let animation = 0;
+    const format = n => (Math.abs(n) < 0.00001 ? 0 : n).toFixed(2);
+    const clamp = n => Math.min(1.5, Math.max(-1.5, n));
+    const pixel = (p,w,h) => ({x:(p.x+1)*w/2, y:(p.y+1)*h/2});
+    function clipped(poly) {
+      const edges = [
+        {axis:'x', bound:-1, direction:1}, {axis:'x', bound:1, direction:-1},
+        {axis:'y', bound:-1, direction:1}, {axis:'y', bound:1, direction:-1}
+      ];
+      for (const edge of edges) {
+        const input = poly; poly = [];
+        if (!input.length) break;
+        let a = input[input.length-1];
+        for (const b of input) {
+          const ai = edge.direction*(a[edge.axis]-edge.bound) >= 0;
+          const bi = edge.direction*(b[edge.axis]-edge.bound) >= 0;
+          if (ai !== bi) {
+            const t = (edge.bound-a[edge.axis])/(b[edge.axis]-a[edge.axis]);
+            poly.push({x:a.x+t*(b.x-a.x), y:a.y+t*(b.y-a.y)});
+          }
+          if (bi) poly.push(b);
+          a = b;
+        }
+      }
+      return poly;
+    }
+    function element(tag, attrs, text) {
+      const e = document.createElementNS(ns, tag);
+      for (const [key,value] of Object.entries(attrs || {})) e.setAttribute(key, String(value));
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+    function drawPlot(svg, isPixels) {
+      const width = Math.max(240, svg.parentElement.getBoundingClientRect().width);
+      const [W,H] = presets[state.viewport];
+      const ratio = isPixels ? H/W : 1;
+      const available = width-84;
+      const innerW = Math.min(available-24, 226/ratio);
+      const frameW = innerW+24;
+      const frameH = innerW*ratio+24;
+      const left = 64+(available-frameW)/2, top = 18;
+      const right = left+frameW, bottom = top+frameH;
+      const height = bottom+60;
+      svg.setAttribute('viewBox', '0 0 '+width+' '+height);
+      svg.setAttribute('height', String(height));
+      svg.replaceChildren();
+      const title = element('title', {}, isPixels ? 'NDC からピクセル座標への変換' : '三角形と NDC の表示範囲');
+      const desc = element('desc', {}, '頂点 A をスライダーで変更。塗りつぶした部分が表示範囲内に残る三角形。z は 0、w は 1。');
+      svg.append(title, desc);
+      const values = [Number(xInput.min), Number(xInput.max), -1, 1, shown.x, shown.y, 0.5, -0.5];
+      const low = Math.min(...values), high = Math.max(...values);
+      const sx = n => left+12+(n-low)/(high-low)*(frameW-24);
+      const sy = n => bottom-12-(n-low)/(high-low)*(frameH-24);
+      const add = (tag,attrs,text) => { const e = element(tag,attrs,text); svg.append(e); return e; };
+      add('rect', {x:left,y:top,width:frameW,height:frameH,class:'nv-frame','data-chart-frame':''});
+      const ticks = [-1,0,1];
+      for (const t of ticks) {
+        add('line', {x1:sx(t),y1:top,x2:sx(t),y2:bottom,class:'nv-grid'});
+        add('line', {x1:left,y1:sy(t),x2:right,y2:sy(t),class:'nv-grid'});
+        const tx = isPixels ? Math.round((t+1)*W/2) : t;
+        const ty = isPixels ? Math.round((t+1)*H/2) : t;
+        add('text', {x:sx(t),y:bottom+20,'text-anchor':'middle'}, tx);
+        add('text', {x:left-10,y:sy(t)+4,'text-anchor':'end'}, ty);
+      }
+      add('rect', {x:sx(-1),y:sy(1),width:sx(1)-sx(-1),height:sy(-1)-sy(1),class:'nv-boundary'});
+      const points = [{x:shown.x,y:shown.y,name:'A'},{x:0.5,y:-0.5,name:'B'},{x:0,y:0.5,name:'C'}];
+      const polygonPoints = poly => poly.map(p => sx(p.x)+','+sy(p.y)).join(' ');
+      add('polygon', {points:polygonPoints(points),class:'nv-original'});
+      const visible = clipped(points);
+      if (visible.length >= 3) add('polygon', {points:polygonPoints(visible),class:'nv-visible'});
+      const groups = [];
+      for (const p of points) {
+        let g = groups.find(q => Math.abs(q.x-p.x)<0.001 && Math.abs(q.y-p.y)<0.001);
+        if (!g) { g = {...p,names:[]}; groups.push(g); }
+        g.names.push(p.name);
+      }
+      const staticLabels = [];
+      const bounds = e => { const b = e.getBBox(); return {x:b.x,y:b.y,w:b.width,h:b.height}; };
+      const overlaps = (a,b) => a.x < b.x+b.w+4 && a.x+a.w+4 > b.x && a.y < b.y+b.h+4 && a.y+a.h+4 > b.y;
+      for (const p of groups) {
+        const x = sx(p.x), y = sy(p.y), active = p.names.includes('A');
+        const inside = Math.abs(p.x)<=1 && Math.abs(p.y)<=1;
+        add('circle', {cx:x,cy:y,r:active?5:3.5,class:active&&inside?'nv-active':'nv-point'});
+        const label = add('text', {x:x+8,y:y-8,'text-anchor':'start'}, p.names.join('/'));
+        let placed = false;
+        for (const [dx,dy,anchor] of [[8,-8,'start'],[-8,-8,'end'],[8,20,'start'],[-8,20,'end']]) {
+          label.setAttribute('x',x+dx); label.setAttribute('y',y+dy); label.setAttribute('text-anchor',anchor);
+          const b = bounds(label);
+          if (b.x>=left+4 && b.x+b.w<=right-4 && b.y>=top+4 && b.y+b.h<=bottom-4 && !staticLabels.some(q=>overlaps(b,q))) {
+            staticLabels.push(b); placed = true; break;
+          }
+        }
+        if (!placed) label.remove();
+      }
+      add('text', {x:(left+right)/2,y:height-10,'text-anchor':'middle',class:'axis-title','data-axis':'x'}, isPixels?'x (px)':'x NDC');
+      add('text', {x:16,y:(top+bottom)/2,'text-anchor':'middle',transform:'rotate(-90 16 '+((top+bottom)/2)+')',class:'axis-title','data-axis':'y'}, isPixels?'y (px)':'y NDC');
+    }
+    function draw() {
+      drawPlot(root.querySelector('#nv-ndc'), false);
+      drawPlot(root.querySelector('#nv-pixels'), true);
+    }
+    function describe() {
+      xValue.textContent = format(state.x); yValue.textContent = format(state.y);
+      const [w,h] = presets[state.viewport], p = pixel(state,w,h);
+      const inside = Math.abs(state.x)<=1 && Math.abs(state.y)<=1;
+      detail.textContent = 'A: NDC ('+format(state.x)+', '+format(state.y)+') → ('+format(p.x)+', '+format(p.y)+') px · '+(inside?'表示範囲内':'表示範囲外');
+    }
+    function update(animate) {
+      describe(); cancelAnimationFrame(animation);
+      if (!animate || reduceMotion.matches) { shown = {x:state.x,y:state.y}; draw(); return; }
+      const start = {...shown}, target = {x:state.x,y:state.y}, t0 = performance.now();
+      function frame(now) {
+        const t = Math.min(1,(now-t0)/140), eased = 1-Math.pow(1-t,3);
+        shown = {x:start.x+(target.x-start.x)*eased,y:start.y+(target.y-start.y)*eased};
+        draw();
+        if (t<1) animation = requestAnimationFrame(frame);
+      }
+      animation = requestAnimationFrame(frame);
+    }
+    function readInputs() {
+      state = {x:clamp(Number(xInput.value)), y:clamp(Number(yInput.value)), viewport:viewportInput.value};
+      update(true);
+    }
+    function save() {
+      if (typeof window.openai?.setWidgetState === 'function') {
+        const [width,height] = presets[state.viewport];
+        const snapshot = {x:state.x,y:state.y,viewport:state.viewport};
+        window.openai.setWidgetState({modelContent:{...snapshot,width,height},privateContent:snapshot}).catch(()=>{});
+      }
+    }
+    function applySaved(saved) {
+      const s = saved?.privateContent || saved?.modelContent || saved || {};
+      state = {x:Number.isFinite(s.x)?clamp(s.x):-0.5,y:Number.isFinite(s.y)?clamp(s.y):-0.5,viewport:presets[s.viewport]?s.viewport:'640x480'};
+      xInput.value = state.x; yInput.value = state.y; viewportInput.value = state.viewport;
+      update(false);
+    }
+    for (const input of [xInput,yInput,viewportInput]) {
+      input.addEventListener('input',readInputs);
+      input.addEventListener('change',save);
+    }
+    new ResizeObserver(draw).observe(root.querySelector('.nv-plots'));
+    window.addEventListener('openai:set_globals',e=>applySaved(e.detail?.globals?.widgetState));
+    applySaved(window.openai?.widgetState);
+  })();
+  </script>
+</div>
