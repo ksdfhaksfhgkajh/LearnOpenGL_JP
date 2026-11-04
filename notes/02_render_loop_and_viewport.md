@@ -122,6 +122,41 @@ glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 
 参考：[GLFW：フレームバッファのサイズとコールバック](https://www.glfw.org/docs/3.4/window_guide.html#window_fbsize)、[LearnOpenGL：視口](https://learnopengl.com/Getting-started/Hello-Window)。
 
+### トラブル：図形が小さい・左下に寄る
+
+2026-11-02 の書き直しでは、ウィンドウ作成に使った固定値 `640 × 480` を、初期の `glViewport()` にもそのまま渡していた。
+
+`glfwCreateWindow()` の幅・高さはスクリーン座標で、`glViewport()` の幅・高さはフレームバッファのピクセル数。変数を `framebufferWidth` と名付けても、ウィンドウ作成時の指定値が実際のピクセル数になるわけではない。
+
+Retina では、例えばウィンドウが `640 × 480` でもフレームバッファが `1280 × 960` になる場合がある。そのとき `glViewport(0, 0, 640, 480)` を指定すると、NDC 全体の対応先がフレームバッファの左下 1/4 の領域になる。この値は例であり、実際のサイズは取得して確認する。
+
+GLAD 初期化後、描画ループに入る前に、固定値を渡していた初期の `glViewport()` を次の処理へ置き換える。
+
+```cpp
+int fbWidth = 0;
+int fbHeight = 0;
+glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+glViewport(0, 0, fbWidth, fbHeight);
+std::cout << "Framebuffer: " << fbWidth << " x " << fbHeight << '\n';
+```
+
+`glfwGetFramebufferSize()` は、現在の実際の幅・高さを出力引数へ書き込む。取得したピクセル数で視口を設定し、出力した値で表示倍率による違いも確認する。
+
+既存の `glfwSetFramebufferSizeCallback(window, framebufferSizeCallback)` は、サイズ変更時の対応として使う。登録自体が初期の視口設定を行うわけではないため、起動時には上の取得・設定も行う。サイズ変更で図形の位置や大きさが急に直る場合は、初期設定とコールバックの設定値の違いが手がかりになる。
+
+さらに、頂点座標による図形自身の大きさも区別する。現在の頂点シェーダーは `gl_Position = vec4(aPos, 1.0)` なので、入力の x・y と NDC が同じ。四頂点の x・y は `−0.5 ～ 0.5`、表示範囲は `−1 ～ 1` なので、図形の幅・高さはそれぞれ視口の半分となる。
+
+| フレームバッファを 1280 × 960 とした例 | 図形の幅 × 高さ | 位置 |
+| --- | --- | --- |
+| 視口が 640 × 480 のまま | 320 × 240 ピクセル | 左下の視口の中央 |
+| 視口を 1280 × 960 に合わせる | 640 × 480 ピクセル | ウィンドウ内容全体の中央 |
+
+視口を合わせた後、図形をさらに大きくしたければ、頂点の x・y の `±0.5` を `±0.8` にすると、幅・高さがそれぞれ視口の 80% になる。まずは視口を正しく設定し、それから頂点座標で大きさを調整する。
+
+実際のフレームバッファサイズ、視口の修正後の表示結果は未確認。
+
+参考：[GLFW：ウィンドウサイズとピクセル数の違い](https://www.glfw.org/docs/3.4/window_guide.html#window_fbsize)、[glViewport：NDC とピクセル座標の対応](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glViewport.xhtml)。座標の変換式は[第3章](03_pipeline_and_coordinates.md)を参照。
+
 
 ---
 

@@ -205,6 +205,58 @@ GLAD は、現在のコンテキストで使える OpenGL 関数のアドレス�
 
 参考：[GLFW：GLAD による関数の読み込み](https://www.glfw.org/docs/3.4/context_guide.html#context_glext_auto)、[LearnOpenGL：Hello Window](https://learnopengl.com/Getting-started/Hello-Window)。
 
+### トラブル：OpenGL header already included
+
+2026-11-04、シェーダーをクラスへ整理した後、`main.cpp` の先頭が次の順序になっていた。
+
+```cpp
+#include <GLFW/glfw3.h>
+#include <glad/glad.h>
+```
+
+GLFW のヘッダーは、標準では環境が提供する OpenGL ヘッダーも読み込む。この macOS 環境では `GLFW/glfw3.h` 内から `OpenGL/gl.h` が読み込まれる。
+
+GLAD のヘッダー自身も OpenGL の型・定数・関数宣言を提供する。今回の GLAD 1 は、先に通常の OpenGL ヘッダーが読み込まれたことを検出すると、`#error OpenGL header already included, remove this include, glad already provides it` で処理を止める。これは C++ のビルド時のヘッダーの競合。
+
+今回の修正は、GLAD を GLFW より先に読み込むこと。
+
+```cpp
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
+#include <iostream>
+#include "Shader.h"
+```
+
+GLFW は先に読み込まれた GLAD を検出し、通常の OpenGL ヘッダーの自動読み込みを省略する。
+
+`Shader.h` 自身も `GLuint` などを使うため、そこで `<glad/glad.h>` を読み込んでよい。同じ GLAD ヘッダーを複数箇所から読み込むことには、ヘッダー内のインクルードガードが対応している。
+
+別の方法として、GLFW を最初に読み込む前に `GLFW_INCLUDE_NONE` を定義すると、OpenGL ヘッダーの自動読み込みを明示的に無効にできる。
+
+```cpp
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+#include <glad/glad.h>
+```
+
+2026-11-04：ヘッダーだけの構文確認で、元の順序では同じエラーが再現し、GLAD を先にした順序では成功した。その後、`main.cpp` の順序修正をコード上で確認し、学習者からプログラムが動作したとの報告あり。
+
+参考：[GLFW：GLAD とのヘッダーの順序](https://www.glfw.org/docs/3.4/build_guide.html#build_include)、[GLFW_INCLUDE_NONE](https://www.glfw.org/docs/3.4/build_guide.html#GLFW_INCLUDE_NONE)。このプロジェクトでは GLAD 1 の `<glad/glad.h>` を使う。
+
+### macOS の入力関連ログ：TSM / Caps Lock
+
+2026-11-04、プログラムの動作成功とともに、次のログが表示されたとの報告あり。
+
+```text
+TSM AdjustCapsLockLEDForKeyTransitionHandling - _ISSetPhysicalKeyboardCapsLockLED Inhibit
+```
+
+TSM は Text Services Manager（文字入力を扱う macOS の機構）。`CapsLockLED` は Caps Lock キーの表示ランプを指し、`Inhibit` は「抑制する」という意味。文言からは、macOS の入力処理で Caps Lock の LED 更新を抑制している旨の診断ログと考えられる。具体的な発生条件・ログの重大度について、この文字列を説明する Apple の公開資料は確認できていない。
+
+この行からシェーダーのコンパイル失敗や描画の失敗は読み取れない。描画やキー操作が正常なら、現時点でこのログへの対処は不要。
+
+参考：[Apple：InputMethodKit と Text Services Manager](https://developer.apple.com/documentation/inputmethodkit)。TSM と文字入力の関係は公開資料に基づき、上記の内部ログの意味は文言からの解釈として区別する。
+
 
 ---
 

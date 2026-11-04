@@ -178,6 +178,34 @@ std::cout << "Vertex shader compilation succeeded\n";
 
 シェーダーの作成失敗と、作成済みシェーダーのコンパイル失敗は別。失敗処理の `glDeleteShader()` は、作成済みのオブジェクトを片付けるために呼ぶ。
 
+### トラブル：失敗メッセージだけ出て、ログが空
+
+2026-11-02 の書き直しでは、頂点側・フラグメント側の両方で `glCompileShader()` の呼び出しが抜けていた。
+
+`glShaderSource()` はソースをコピーし、`glGetShaderiv()` は保存済みの状態を取得する。それぞれコンパイルを実行する処理とは別なので、間に `glCompileShader()` が必要。
+
+新しく作ったシェーダーでは、コンパイル状態の初期値は `GL_FALSE`、診断ログは空。コンパイルせずに状態を確認すると失敗側の分岐へ入るが、コンパイラーの診断はまだ生成されていない。
+
+`Failed to compile vertex shader` は、自分の `std::cerr` が表示している固定メッセージ。この文字列が出ても、実際にコンパイルを行った証拠にはならない。ログを取得する関数も、保存されているログを読み出すだけ。
+
+修正する位置は、各シェーダーのソース登録直後、結果の取得より前。
+
+```cpp
+glShaderSource(vertexShader, 1, &vertexShaderSrc, nullptr);
+glCompileShader(vertexShader);  // 頂点シェーダーをコンパイルする
+// この後で GL_COMPILE_STATUS を取得する
+```
+
+```cpp
+glShaderSource(fragmentShader, 1, &fragmentShaderSrc, nullptr);
+glCompileShader(fragmentShader);  // フラグメントシェーダーも同様
+// この後で GL_COMPILE_STATUS を取得する
+```
+
+2026-11-02：両シェーダーの `glCompileShader()` の追加をコード上で確認し、学習者から修正後に動作したとの報告あり。
+
+参考：[glShaderSource：ソースの登録](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glShaderSource.xhtml)、[glGetShaderiv：状態の取得](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glGetShader.xhtml)、[glGetShaderInfoLog：作成直後のログは空](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glGetShaderInfoLog.xhtml)。
+
 ### 正常終了時の後片付け
 
 成功した場合に備え、`while` の後、既存の `glDeleteBuffers()` より前に次を追加する。

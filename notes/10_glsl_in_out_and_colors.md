@@ -1,6 +1,6 @@
 # 第10章：GLSL の入出力と頂点色
 
-[目次](../README.md) · [前の章](09_wireframe_and_input.md) · [早見表](reference.md)
+[目次](../README.md) · [前の章](09_wireframe_and_input.md) · [次の章](11_uniforms.md) · [早見表](reference.md)
 
 ## 実習：GLSL の in・out と頂点色の補間
 
@@ -138,17 +138,19 @@ void main()
 
 ### 今回の確認
 
-- [ ] quadVertices に各頂点の RGB を追加する。
-- [ ] 位置と色の両方で stride を六つの float にし、色の属性 1 を有効化する。
-- [ ] 頂点シェーダーの色の入力・出力と、フラグメントシェーダーの色の入力を追加する。
-- [ ] 両シェーダーのコンパイルと、プログラムのリンクが成功する。
+- [x] quadVertices に各頂点の RGB を追加する。
+- [x] 位置と色の両方で stride を六つの float にし、色の属性 1 を有効化する。
+- [x] 頂点シェーダーの色の入力・出力と、フラグメントシェーダーの色の入力を追加する。
+- [x] 両シェーダーのコンパイルと、プログラムのリンクが成功する。
 - [ ] 塗りつぶし表示で、四隅の色と面のグラデーションを確認する。
 
-色の観察には 2 キーで塗りつぶし表示を選ぶ。今回新しい OpenGL 関数はなく、既に学んだ頂点属性設定を再利用する。コードの追加・GLSL のコンパイルとリンク・色の表示結果は未確認。
+色の観察には 2 キーで塗りつぶし表示を選ぶ。今回新しい OpenGL 関数はなく、既に学んだ頂点属性設定を再利用する。
+
+2026-11-04：RGB を含む `quadVertices`、属性 0・1 の設定、GLSL の `aColor` → `vertexColor` → `fragColor` の受け渡しをコード上で確認。学習者からカラフルな図形が表示されたとの報告あり。四隅それぞれの色を観察した詳細は未報告。GLSL は現在、`shaders/vertex.glsl` と `shaders/fragment.glsl` に分け、`Shader` クラスで読み込み・コンパイル・リンクしている。
 
 参考：[LearnOpenGL：Shaders の入力・出力と頂点色](https://learnopengl.com/Getting-started/Shaders)、[GLSL 3.30 公式仕様：ステージ間の入出力・補間](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.3.30.pdf)。
 
 
 ---
 
-[目次](../README.md) · [前の章](09_wireframe_and_input.md) · [早見表](reference.md)
+[目次](../README.md) · [前の章](09_wireframe_and_input.md) · [次の章](11_uniforms.md) · [早見表](reference.md)

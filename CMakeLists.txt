@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 file(COPY
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
         "${CMAKE_CURRENT_SOURCE_DIR}/thirdParty"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
         DESTINATION ${CMAKE_BINARY_DIR}
 )
 

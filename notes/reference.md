@@ -17,6 +17,7 @@
 | `glfwGetKey(window, key)` | 最後に報告されたキーの状態を取得。`GLFW_PRESS` または `GLFW_RELEASE` | 入力処理 |
 | `glfwSetWindowShouldClose(window, value)` | 終了要求のフラグを設定。戻り値なし。ウィンドウの破棄自体は行わない | Esc キーなどで終了を要求するとき |
 | `glfwPollEvents()` | 届いている OS のイベントを処理し、入力状態などを更新。戻り値なし | 毎フレーム |
+| `glfwGetTime()` | GLFW 初期化からの経過秒数を取得。引数なし、戻り値は `double`。タイマーの基準時刻を変更していない場合 | 時間に応じて uniform を変えるため、毎フレームの計算前 |
 | `glfwSwapBuffers(window)` | 表示用と描画用のカラーバッファを交換。戻り値なし | 毎フレーム、描画の後 |
 | `glfwGetFramebufferSize(window, &width, &height)` | 描画先の幅・高さをピクセル単位で取得。出力引数に値を書き込む。戻り値なし | 初期の視口を設定するとき |
 | `glfwSetFramebufferSizeCallback(window, callback)` | フレームバッファのサイズが変化したときの関数を登録。戻り値は以前のコールバック（未登録なら `nullptr`） | 今回は GLAD 初期化後、ループに入る前 |
@@ -26,7 +27,7 @@
 
 `glfwPollEvents()` は OS から届いたイベントを処理する関数で、ハードウェア割り込みを直接処理する関数ではない。
 
-参考：[GLFW 3.4 入門](https://www.glfw.org/docs/3.4/quick_guide.html)、[キー入力](https://www.glfw.org/docs/3.4/input_guide.html#input_key)、[コンテキストと関数の読み込み](https://www.glfw.org/docs/3.4/context_guide.html)。
+参考：[GLFW 3.4 入門](https://www.glfw.org/docs/3.4/quick_guide.html)、[キー入力](https://www.glfw.org/docs/3.4/input_guide.html#input_key)、[時間の取得](https://www.glfw.org/docs/3.4/input_guide.html#time)、[コンテキストと関数の読み込み](https://www.glfw.org/docs/3.4/context_guide.html)。
 
 ## OpenGL 関数の早見表
 
@@ -49,7 +50,7 @@
 | `glCreateShader(type)` | `GL_VERTEX_SHADER` は頂点用、`GL_FRAGMENT_SHADER` はフラグメント用のオブジェクトを作成。戻り値は `GLuint` の ID、作成失敗時は 0 | GLAD 初期化後、各シェーダーのソース登録前 |
 | `glShaderSource(shader, count, strings, lengths)` | `count` 個の文字列をシェーダーへコピー。`strings` は文字列ポインターの配列、`lengths` が `nullptr` なら各文字列をヌル終端として扱う。戻り値なし | 作成したシェーダーのコンパイル前 |
 | `glCompileShader(shader)` | 登録済みの GLSL ソースをコンパイルし、結果をシェーダーオブジェクトに保持。戻り値なし | ソース登録後、初期化時 |
-| `glGetShaderiv(shader, pname, &value)` | `GL_COMPILE_STATUS` で成功・失敗、`GL_INFO_LOG_LENGTH` で終端を含むログの必要容量を取得。ログが空なら容量は 0 の場合もある。値は整数の出力引数へ書き込む。戻り値なし | コンパイル後の結果確認・ログ領域の確保 |
+| `glGetShaderiv(shader, pname, &value)` | `GL_COMPILE_STATUS` で成功・失敗、`GL_INFO_LOG_LENGTH` で終端を含むログの必要容量を取得。ログが空なら容量は 0 の場合もある。値は整数の出力引数へ書き込む。コンパイル自体は実行しない。戻り値なし | `glCompileShader()` 後の結果確認・ログ領域の確保 |
 | `glGetShaderInfoLog(shader, capacity, &length, buffer)` | 診断ログを文字配列へ取得。`capacity` は実際に確保した保存先の容量以下にする。長さを使わなければ第 3 引数は `nullptr`。戻り値なし | 失敗の原因や警告を確認するとき |
 | `glDeleteShader(shader)` | シェーダーの削除を要求。引数は ID 自体。プログラムに接続中は実際の削除が遅延する。戻り値なし | 今回はリンク成功後、または失敗時。正常経路ではループ後からリンク成功後へ移す |
 | `glCreateProgram()` | 空のプログラムオブジェクトを作成。戻り値は `GLuint` の ID、作成失敗時は 0 | 今回は両シェーダーのコンパイル成功後 |
@@ -57,15 +58,18 @@
 | `glLinkProgram(program)` | 接続済みのシェーダーから、描画で使う実行用のプログラムを構築。戻り値なし | 必要なシェーダーを接続した後、初期化時 |
 | `glGetProgramiv(program, pname, &value)` | `GL_LINK_STATUS` でリンクの成功・失敗、`GL_INFO_LOG_LENGTH` でログの必要容量を取得。値は整数の出力引数へ書き込む。戻り値なし | リンク後の結果確認 |
 | `glGetProgramInfoLog(program, capacity, &length, buffer)` | プログラムの診断ログを文字配列へ取得。容量を実際の保存先に合わせる。戻り値なし | リンク失敗の原因を確認するとき |
-| `glUseProgram(program)` | 後続の描画に使うシェーダープログラムを選ぶ。0 を渡すと現在のプログラムを解除。戻り値なし | リンク成功後、描画前。今回はループ内で選び、終了時に解除 |
+| `glUseProgram(program)` | 後続の描画と `glUniform*()` で使うシェーダープログラムを選ぶ。0 を渡すと現在のプログラムを解除。戻り値なし | リンク成功後、uniform の設定・描画前。プログラムを切り替えるとき |
+| `glGetUniformLocation(program, name)` | リンク済みプログラム内の、有効な uniform の名前に対応する location を取得。戻り値は `GLint`。見つからなければ `-1`。VAO の属性番号とは別 | リンク成功後、uniform に値を設定する前。現在の `Shader::setFloat()` などの内部 |
+| `glUniform1f(location, value)` | 現在選択されているプログラムの uniform に float を一つ設定。location が `-1` なら無視される。戻り値なし | `use()` 後、描画前。値を変更するとき |
+| `glUniform1i(location, value)` | 現在選択されているプログラムの int・bool 用 uniform に整数を一つ設定。bool は 0 が偽、それ以外が真。戻り値なし | 現在の `Shader::setInt()`・`setBool()` の内部。`use()` 後、描画前 |
 | `glDrawArrays(mode, first, count)` | 現在のプログラムと VAO の頂点入力を使って描画。`mode` は組み立てるプリミティブ、`first` は先頭の頂点番号、`count` は頂点数。戻り値なし | 毎フレーム、消去後・バッファ交換前 |
 | `glDrawElements(mode, count, type, offset)` | 現在の VAO の EBO から頂点番号を読み、その順番で描画。`count` は読むインデックスの個数、`type` はインデックスの整数型、`offset` は EBO 内のバイト位置をポインター型で指定。戻り値なし | EBO を使う描画。今回は消去後・バッファ交換前 |
 | `glPolygonMode(face, mode)` | ポリゴンのラスタライズ方法を設定。Core Profile では `face` は `GL_FRONT_AND_BACK`。`GL_LINE` は辺を線表示、`GL_FILL` は内部を塗りつぶす（初期値）。戻り値なし | 初期表示の設定、キー入力などで表示方法を切り替えるとき |
-| `glDeleteProgram(program)` | プログラムの削除を要求。使用中は削除が遅延する。戻り値なし | リンク失敗時、またはループ後。今回は `glUseProgram(0)` の後、`glfwTerminate()` より前 |
+| `glDeleteProgram(program)` | プログラムの削除を要求。使用中は削除が遅延する。戻り値なし | 現在は `Shader` のデストラクター内。対応するコンテキストが有効な間、`glfwTerminate()` より前に呼ぶ |
 
 `glClearColor()` と `glViewport()` は設定を記憶させる関数。`glClear()` は、現在の設定を使って実際にバッファを書き換える関数。
 
-参考：[LearnOpenGL：Hello Window](https://learnopengl.com/Getting-started/Hello-Window)、[Hello Triangle](https://learnopengl.com/Getting-started/Hello-Triangle)。
+参考：[LearnOpenGL：Hello Window](https://learnopengl.com/Getting-started/Hello-Window)、[Hello Triangle](https://learnopengl.com/Getting-started/Hello-Triangle)、[glGetUniformLocation](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glGetUniformLocation.xhtml)、[glUniform](https://registry.khronos.org/OpenGL-Refpages/gl4/html/glUniform.xhtml)。
 
 ## GLAD 関数の早見表
 
@@ -88,6 +92,11 @@
 | `layout (location = N) in` | 頂点シェーダーの入力を、VAO の属性番号 N に対応させる |
 | `in` | そのシェーダーステージへの入力。今回は頂点側で位置・色を受け取り、フラグメント側で補間された色を受け取る |
 | `out` | そのシェーダーステージからの出力。今回は頂点側で色を渡し、フラグメント側で描画用の色を出す |
+| `uniform float brightness;` | C++ から設定する一成分の float を宣言。同じ描画中のシェーダー実行で共通に使い、シェーダー側からは読み取り専用 |
+| `vertexColor * brightness` | RGB の各成分に同じ係数を掛ける。今回の明るさの調整に使う |
+| `layout (location = 2) in vec2 aTexCoord;` | VAO の属性 2 から UV 二成分を受け取る |
+| `out vec2 texCoord` / `in vec2 texCoord` | 頂点側の UV をフラグメント側へ渡す。フラグメントごとに補間された値を受け取る |
+| `vec3(texCoord, 0.0)` | UV を `(u, v, 0)` の RGB にして、対応を色で可視化する |
 | `gl_Position` | 頂点シェーダーの組み込み出力変数。クリップ座標の `vec4` を代入する |
 | `vec4(aPos, 1.0)` | 三成分に四つ目の値を補って vec4 を構築。gl_Position に使う場合は x・y・z・w |
 | `vec4(vertexColor, 1.0)` | RGB の三成分にアルファを補って RGBA の出力を構築 |
